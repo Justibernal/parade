@@ -1,0 +1,77 @@
+Parade – TP Integrador
+
+Cliente/servidor en Java (Swing + RMI) del juego Parade.
+Soporta 2 o más jugadores, ranking Top-10, guardar/cargar partida y fase final con elección de 2 cartas.
+
+Requisitos
+
+JDK 17+ (recomendado)
+
+(Opcional) Maven 3.9+ o tu IDE favorito (IntelliJ/Eclipse/NetBeans)
+
+Estructura (paquetes principales)
+
+modelo.core → estado del juego, cartas, colores
+
+modelo.reglas → lógica de Parade
+
+modelo.puntaje → puntajes y ranking
+
+servidor → implementación RMI del servidor
+
+controlador / net → interfaz/transportes RMI
+
+vista.gui → Cliente Swing (ClienteSwingMain)
+
+Cómo ejecutar
+Opción A – desde IDE (más fácil)
+
+Ejecutá la clase main del servidor (por ej. servidor.ServidorMain).
+
+Si tu clase tiene otro nombre, usá esa.
+
+Ejecutá 2 o más veces la clase vista.gui.ClienteSwingMain (uno por jugador).
+
+Uso rápido (GUI)
+
+Al abrir el cliente, ingresás tu nombre.
+
+Botón/menú Start: inicia la partida (cuando haya 2+ conectados).
+
+Parade: siempre jugás a la derecha → y se evalúa hacia la izquierda ← (la GUI lo indica).
+
+Jugar: doble-click en una carta de tu mano o botón “Jugar (índice seleccionado)”.
+
+Fase final: cuando se activa, aparece “Elegir 2 cartas finales”.
+Seleccioná exactamente 2 cartas de tu mano (Ctrl/Shift para múltiple) y confirmá.
+
+Guardar/Cargar: desde el menú Juego.
+
+Ranking (Top-10): menú Ver → Ranking (Top 10).
+
+Atajos: Enter = Jugar, Ctrl/Cmd + S = Start.
+
+Reglas rápidas (implementadas)
+
+Jugás 1 carta al final del parade.
+
+Ignorás N cartas más cercanas (N = valor jugado).
+
+Desde la carta N+1 hacia el otro extremo, capturás cartas de tu color o de valor ≤ N.
+
+Robás 1 carta (si hay mazo).
+
+Fin: sin mazo o alguien tiene los 6 colores → cada jugador mueve 2 cartas de la mano a sus pilas.
+
+Puntaje por color:
+
+Con mayoría → 1 punto por carta.
+
+Sin mayoría → suma de valores.
+Gana el menor total.
+
+Persistencia
+
+Partida y ranking se guardan en disco (ver clase persistencia.Persistencia y modelo.puntaje.TablaClasificacion).
+
+Los archivos/rutas pueden ajustarse allí.

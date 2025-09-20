@@ -1,0 +1,24 @@
+# IDEs
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+
+# Builds
+target/
+out/
+bin/
+build/
+*.class
+
+# SO / temporales
+.DS_Store
+*.log
+*.tmp
+
+# Datos de juego / partidas guardadas (ajustá si usás otro path o extensión)
+data/
+saves/
+persistencia/*.dat
+persistencia/*.ser
