@@ -1,0 +1,5 @@
+package parade.observer;
+
+public class EventoBus {
+
+}

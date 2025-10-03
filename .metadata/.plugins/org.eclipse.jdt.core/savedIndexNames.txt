@@ -1,0 +1,7 @@
+INDEX VERSION 1.134+/Users/asdas/Desktop/UNLU/eclipse/.metadata/.plugins/org.eclipse.jdt.core
+1155903527.index
+1865797976.index
+3213047619.index
+3423594360.index
+3666238409.index
+2795051871.index

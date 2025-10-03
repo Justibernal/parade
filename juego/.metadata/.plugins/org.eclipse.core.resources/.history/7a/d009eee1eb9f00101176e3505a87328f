@@ -1,0 +1,363 @@
+package servidor;
+
+import persistencia.Persistencia;
+
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.*;
+
+import modelo.core.*;
+import modelo.puntaje.EntradaClasificacion;
+import modelo.puntaje.TablaClasificacion;
+import modelo.reglas.ReglasParade;
+import net.*;
+
+public class ServidorJuegoImpl extends UnicastRemoteObject implements ServidorJuegoRemoto {
+    private static final long serialVersionUID = 1L;
+
+    private final Map<String, CallbackClienteRemoto> clientes  = new LinkedHashMap<>();
+    private final Map<String, EstadoJuego.Jugador>   jugadores = new LinkedHashMap<>();
+    private final EstadoJuego estado = new EstadoJuego();
+    private final ReglasParade reglas = new ReglasParade();
+
+    public ServidorJuegoImpl() throws RemoteException { super(); }
+
+    // === RMI API ===
+    @Override
+    public synchronized String join(String nombre, CallbackClienteRemoto cb) throws RemoteException {
+        verificarClientesActivos();
+
+        if (clientes.isEmpty()) {
+            resetearPartidaCompleta();
+        }
+
+        // Reusar jugador si ya existe
+        for (EstadoJuego.Jugador j : estado.jugadores.values()) {
+            if (j.nombre.equals(nombre)) {
+                clientes.put(j.id, cb);
+                broadcast("[info] " + nombre + " se reconectó.");
+                push();
+                return j.id;
+            }
+        }
+
+        // Crear nuevo jugador
+        String id = UUID.randomUUID().toString();
+        var j = new EstadoJuego.Jugador();
+        j.id = id;
+        j.nombre = nombre;
+
+        jugadores.put(id, j);
+        estado.jugadores.put(id, j);
+        clientes.put(id, cb);
+
+        broadcast("Se unió " + nombre);
+        push();
+        return id;
+    }
+
+    // === Verificar clientes activos ===
+    public synchronized void verificarClientesActivos() {
+        List<String> desconectados = new ArrayList<>();
+        for (Map.Entry<String, CallbackClienteRemoto> entry : clientes.entrySet()) {
+            try {
+                entry.getValue().onEvent("[ping]");
+            } catch (RemoteException e) {
+                desconectados.add(entry.getKey());
+            }
+        }
+        for (String id : desconectados) {
+            clientes.remove(id);
+            System.out.println("Cliente desconectado: " + id);
+        }
+        if (clientes.isEmpty() && !estado.jugadores.isEmpty()) {
+            resetearPartidaCompleta();
+        }
+    }
+
+    // === Resetear partida ===
+    private void resetearPartidaCompleta() {
+        estado.jugadores.clear();
+        estado.desfile.clear();
+        estado.turnoDe = null;
+        estado.cartasMazoRestantes = 0;
+        estado.juegoTerminado = false;
+        estado.ultimaRonda = false;
+        estado.causaFin = null;
+        estado.pendientesEleccion.clear();
+        jugadores.clear();
+
+        System.out.println("=== NUEVA PARTIDA - Estado reiniciado ===");
+    }
+
+    // === Chat ===
+    @Override
+    public synchronized void sendChat(String id, String msg) throws RemoteException {
+        String nombre = (estado.jugadores.get(id) != null)
+                ? estado.jugadores.get(id).nombre
+                : id;
+        broadcast("[CHAT] " + nombre + ": " + msg);
+    }
+
+    // === Iniciar partida ===
+    @Override
+    public synchronized void start() throws RemoteException {
+        var lista = new ArrayList<>(jugadores.values());
+        if (lista.size() < 2) {
+            broadcast("[info] Se necesitan al menos 2 jugadores.");
+            return;
+        }
+        estado.ultimaRonda = false;
+        estado.causaFin = null;
+        estado.pendientesEleccion.clear();
+        estado.juegoTerminado = false;
+
+        reglas.iniciar(estado, lista);
+        broadcast("Partida iniciada");
+        push();
+    }
+
+    // === Jugar carta ===
+    @Override
+    public synchronized void playCard(String playerId, int handIndex) throws RemoteException {
+        var jugadorActual = estado.jugadores.get(playerId);
+        if (jugadorActual == null) return;
+
+        if (!Objects.equals(estado.turnoDe, playerId)) {
+            var cb = clientes.get(playerId);
+            if (cb != null) cb.onEvent("No es tu turno.");
+            return;
+        }
+        if (handIndex < 0 || handIndex >= jugadorActual.mano.size()) {
+            var cb = clientes.get(playerId);
+            if (cb != null) cb.onEvent("Índice inválido: " + handIndex);
+            return;
+        }
+
+        reglas.jugarCarta(estado, playerId, handIndex);
+
+        // ¿Entramos en fase final?
+        if (!estado.ultimaRonda) {
+            boolean sinMazo = (estado.cartasMazoRestantes <= 0);
+            boolean seisColores = estado.jugadores.values().stream()
+                    .anyMatch(jg -> jg.pilas.keySet().size() >= Color.values().length);
+
+            if (sinMazo || seisColores) {
+                estado.ultimaRonda = true;
+                estado.causaFin = sinMazo ? "sin_mazo" : "seis_colores";
+                estado.turnoDe = null;
+                estado.pendientesEleccion.clear();
+                estado.pendientesEleccion.addAll(estado.jugadores.keySet());
+
+                broadcast("¡Última ronda! Motivo: " +
+                        (sinMazo ? "se agotó el mazo" : "un jugador completó los 6 colores") +
+                        ". Cada jugador debe elegir 2 cartas de su mano para mover a sus pilas.");
+                push();
+                return;
+            }
+        }
+        push();
+    }
+
+    // === Fase final: elección ===
+    @Override
+    public synchronized void chooseFinalCards(String playerId, int[] indices) throws RemoteException {
+        var j = estado.jugadores.get(playerId);
+        if (j == null) return;
+
+        if (!estado.ultimaRonda) {
+            var cb = clientes.get(playerId);
+            if (cb != null) cb.onEvent("Aún no es la fase final.");
+            return;
+        }
+        if (!estado.pendientesEleccion.contains(playerId)) {
+            var cb = clientes.get(playerId);
+            if (cb != null) cb.onEvent("Ya registraste tu elección final.");
+            return;
+        }
+        if (indices == null || indices.length != 2) {
+            var cb = clientes.get(playerId);
+            if (cb != null) cb.onEvent("Debés elegir exactamente 2 cartas.");
+            return;
+        }
+
+        Set<Integer> set = new HashSet<>();
+        for (int ix : indices) {
+            if (ix < 0 || ix >= j.mano.size()) {
+                var cb = clientes.get(playerId);
+                if (cb != null) cb.onEvent("Índice inválido: " + ix);
+                return;
+            }
+            if (!set.add(ix)) {
+                var cb = clientes.get(playerId);
+                if (cb != null) cb.onEvent("Los índices deben ser distintos.");
+                return;
+            }
+        }
+
+        Arrays.sort(indices);
+        for (int k = indices.length - 1; k >= 0; k--) {
+            Carta c = j.mano.remove(indices[k]);
+            j.pilas.computeIfAbsent(c.getColor(), cc -> new ArrayList<>()).add(c);
+        }
+
+        estado.pendientesEleccion.remove(playerId);
+        broadcast("[info] " + j.nombre + " eligió sus 2 cartas finales.");
+
+        if (estado.pendientesEleccion.isEmpty()) {
+            estado.turnoDe = null;
+            estado.juegoTerminado = true;
+            List<EntradaClasificacion> clasif = buildClasificacionFinal(estado);
+            TablaClasificacion.appendAll(clasif);
+
+            String resumen = computeScores(estado);
+            broadcast("Fin de juego");
+            broadcast(resumen);
+        }
+        push();
+    }
+
+    // === Guardar / cargar partida ===
+    @Override
+    public synchronized void saveGame() {
+        try {
+            Persistencia.save(estado);
+            broadcast("[info] Partida guardada correctamente.");
+        } catch (Exception e) {
+            broadcast("[error] Error al guardar: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public synchronized void loadGame() {
+        try {
+            if (!clientes.isEmpty()) {
+                broadcast("[error] No se puede cargar partida con jugadores conectados.");
+                return;
+            }
+            EstadoJuego saved = Persistencia.load();
+            if (saved != null) {
+                copiarEstadoCompleto(saved, this.estado);
+                jugadores.clear();
+                jugadores.putAll(estado.jugadores);
+                broadcast("[info] Partida cargada ✓. Únanse los mismos jugadores.");
+                push();
+            } else {
+                broadcast("[info] No hay partida guardada.");
+            }
+        } catch (Exception e) {
+            broadcast("[error] Error al cargar: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public synchronized List<EntradaClasificacion> getTopRanking(int n) {
+        return TablaClasificacion.topN(n);
+    }
+
+    // === Helpers de estado ===
+    private void copiarEstadoCompleto(EstadoJuego fuente, EstadoJuego destino) {
+        destino.jugadores.clear();
+        destino.desfile.clear();
+        destino.pendientesEleccion.clear();
+
+        for (var entry : fuente.jugadores.entrySet()) {
+            EstadoJuego.Jugador jOrig = entry.getValue();
+            EstadoJuego.Jugador jCopia = new EstadoJuego.Jugador();
+            jCopia.id = jOrig.id;
+            jCopia.nombre = jOrig.nombre;
+            jCopia.mano.addAll(jOrig.mano);
+            jCopia.pilas.putAll(jOrig.pilas);
+            destino.jugadores.put(entry.getKey(), jCopia);
+        }
+        destino.desfile.addAll(fuente.desfile);
+        destino.turnoDe = fuente.turnoDe;
+        destino.cartasMazoRestantes = fuente.cartasMazoRestantes;
+        destino.juegoTerminado = fuente.juegoTerminado;
+        destino.ultimaRonda = fuente.ultimaRonda;
+        destino.causaFin = fuente.causaFin;
+        destino.pendientesEleccion.addAll(fuente.pendientesEleccion);
+    }
+
+    private EstadoJuego sanitizeFor(String playerId) {
+        var dst = new EstadoJuego();
+        dst.turnoDe = estado.turnoDe;
+        dst.cartasMazoRestantes = estado.cartasMazoRestantes;
+        dst.juegoTerminado = estado.juegoTerminado;
+        dst.ultimaRonda = estado.ultimaRonda;
+        dst.causaFin = estado.causaFin;
+        dst.pendientesEleccion.addAll(estado.pendientesEleccion);
+        dst.desfile.addAll(estado.desfile);
+
+        for (var e : estado.jugadores.entrySet()) {
+            var j = e.getValue();
+            var jj = new EstadoJuego.Jugador();
+            jj.id = j.id;
+            jj.nombre = j.nombre;
+            if (j.id.equals(playerId)) {
+                jj.mano.addAll(j.mano);
+            }
+            for (var pe : j.pilas.entrySet()) {
+                jj.pilas.put(pe.getKey(), new ArrayList<>(pe.getValue()));
+            }
+            dst.jugadores.put(jj.id, jj);
+        }
+        return dst;
+    }
+
+    private String computeScores(EstadoJuego est) {
+        var jugadoresList = new ArrayList<>(est.jugadores.values());
+        Map<String,Integer> total = new LinkedHashMap<>();
+        Map<String,Integer> totalCartas = new LinkedHashMap<>();
+        for (var j : jugadoresList) { total.put(j.id, 0); totalCartas.put(j.id, 0); }
+
+        for (Color color : Color.values()) {
+            Map<String,Integer> count = new HashMap<>();
+            for (var j : jugadoresList) count.put(j.id, j.pilas.getOrDefault(color, List.of()).size());
+
+            Set<String> mayorias = new HashSet<>();
+            if (jugadoresList.size() == 2) {
+                var a = jugadoresList.get(0); var b = jugadoresList.get(1);
+                if (count.get(a.id) >= count.get(b.id) + 2) mayorias.add(a.id);
+                if (count.get(b.id) >= count.get(a.id) + 2) mayorias.add(b.id);
+            } else {
+                int max = jugadoresList.stream().mapToInt(j -> count.get(j.id)).max().orElse(0);
+                if (max > 0) for (var j : jugadoresList) if (count.get(j.id) == max) mayorias.add(j.id);
+            }
+
+            for (var j : jugadoresList) {
+                var cartas = j.pilas.getOrDefault(color, List.of());
+                totalCartas.put(j.id, totalCartas.get(j.id) + cartas.size());
+                int suma = mayorias.contains(j.id)
+                        ? cartas.size()
+                        : cartas.stream().mapToInt(Carta::getValor).sum();
+                total.put(j.id, total.get(j.id) + suma);
+            }
+        }
+
+        var sb = new StringBuilder();
+        sb.append("PUNTAJES FINALES (gana menor puntaje)\n");
+        for (var j : jugadoresList) {
+            sb.append(j.nombre).append(": ").append(total.get(j.id))
+              .append(" pts (").append(totalCartas.get(j.id)).append(" cartas)\n");
+        }
+        var ganador = jugadoresList.stream()
+                .min(Comparator.comparingInt(total::get)
+                        .thenComparingInt(totalCartas::get))
+                .orElse(jugadoresList.get(0));
+        sb.append("Ganador: ").append(ganador.nombre);
+        return sb.toString();
+    }
+
+    private void broadcast(String msg) {
+        clientes.values().forEach(cb -> { try { cb.onEvent(msg); } catch (Exception ignored) {} });
+    }
+
+    private void push() {
+        for (var entry : clientes.entrySet()) {
+            var pid = entry.getKey();
+            var cb  = entry.getValue();
+            try { cb.onStateUpdate(sanitizeFor(pid)); } catch (Exception ignored) {}
+        }
+    }
+}

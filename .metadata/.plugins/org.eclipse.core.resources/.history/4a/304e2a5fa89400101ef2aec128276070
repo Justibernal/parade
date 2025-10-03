@@ -1,0 +1,57 @@
+package parade.server;
+
+import parade.net.*;
+import parade.modelo.*;
+import parade.reglas.ReglasParade;
+
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.*;
+
+public class GameServerImpl extends UnicastRemoteObject implements GameServerRemote {
+  private final Map<String, GameClientCallbackRemote> clientes = new LinkedHashMap<>();
+  private final Map<String, EstadoJuego.Jugador> jugadores = new LinkedHashMap<>();
+  private final EstadoJuego estado = new EstadoJuego();
+  private final ReglasParade reglas = new ReglasParade();
+
+  public GameServerImpl() throws RemoteException { super(); }
+
+  @Override
+  public synchronized String join(String nombre, GameClientCallbackRemote cb) throws RemoteException {
+    String id = UUID.randomUUID().toString();
+    var j = new EstadoJuego.Jugador();
+    j.id = id; j.nombre = nombre;
+    jugadores.put(id, j);
+    estado.jugadores.put(id, j);
+    clientes.put(id, cb);
+    broadcast("Se unió " + nombre);
+    push();
+    return id;
+  }
+
+  @Override
+  public synchronized void start() throws RemoteException {
+    var lista = new ArrayList<>(jugadores.values());
+    if (lista.size() < 2) { broadcast("Se necesitan al menos 2 jugadores."); return; }
+    reglas.iniciar(estado, lista);
+    broadcast("Partida iniciada");
+    push();
+  }
+
+  @Override
+  public synchronized void playCard(String playerId, int handIndex) throws RemoteException {
+    reglas.jugarCarta(estado, playerId, handIndex);
+    push();
+    if (estado.juegoTerminado) broadcast("Fin de juego");
+  }
+
+  @Override
+  public synchronized EstadoJuego getSnapshot() { return estado; }
+
+  private void broadcast(String msg) {
+    clientes.values().forEach(cb -> { try { cb.onEvent(msg); } catch(Exception ignored){} });
+  }
+  private void push() {
+    clientes.values().forEach(cb -> { try { cb.onStateUpdate(estado); } catch(Exception ignored){} });
+  }
+}

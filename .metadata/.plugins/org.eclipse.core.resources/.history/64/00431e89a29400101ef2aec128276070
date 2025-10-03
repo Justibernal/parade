@@ -1,0 +1,5 @@
+package parade.cliente.consola;
+
+public class ClientCallBack {
+
+}

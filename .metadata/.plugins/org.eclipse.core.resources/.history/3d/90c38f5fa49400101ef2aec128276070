@@ -1,0 +1,98 @@
+package parade.reglas;
+
+import parade.modelo.*;
+import parade.modelo.EstadoJuego.Jugador;
+import java.util.*;
+
+public class ReglasParade {
+  private final Deque<Carta> mazo = new ArrayDeque<>();
+  private boolean ultimaRonda = false;
+
+  public void iniciar(EstadoJuego estado, List<Jugador> jugadores) {
+    // crear mazo de 66 (6 colores, valores 0..10)
+    List<Carta> todas = new ArrayList<>(66);
+    for (Color c : Color.values()) for (int v=0; v<=10; v++) todas.add(new Carta(c, v));
+    Collections.shuffle(todas, new Random()); // podés inyectar seed si querés reproducibilidad
+    mazo.clear();
+    todas.forEach(mazo::push); // tope = última agregada
+
+    // limpiar estado
+    estado.desfile.clear();
+    estado.juegoTerminado = false;
+    jugadores.forEach(j -> {
+      j.mano.clear(); j.pilas = new EnumMap<>(Color.class);
+    });
+
+    // repartir 5 a cada jugador
+    for (int r=0; r<5; r++) for (Jugador j : jugadores) j.mano.add(robar());
+
+    // 6 cartas al centro (desfile)
+    for (int i=0; i<6; i++) estado.desfile.add(robar());
+
+    // turno del primero
+    estado.turnoDe = jugadores.get(0).id;
+    estado.cartasMazoRestantes = mazo.size();
+  }
+
+  public void jugarCarta(EstadoJuego estado, String jugadorId, int indiceMano) {
+    var j = estado.jugadores.get(jugadorId);
+    if (j == null || !Objects.equals(estado.turnoDe, jugadorId) || indiceMano<0 || indiceMano>=j.mano.size()) return;
+
+    Carta jugada = j.mano.remove(indiceMano);
+
+    // 1) colocar al final del desfile
+    estado.desfile.add(jugada);
+
+    // 2) evaluar retiros (VERSIÓN MÍNIMA, correcta a grandes rasgos)
+    //   contar cartas previas (sin la jugada):
+    int prev = estado.desfile.size() - 1;
+    if (prev > jugada.getValor()) {
+      // posiciones a evaluar: desde el final hacia el frente con índice > valor jugado
+      int aEvaluar = prev - jugada.getValor();
+      List<Carta> tomadas = new ArrayList<>();
+      for (int k = prev - 1; k >= prev - aEvaluar; k--) {
+        Carta c = estado.desfile.get(k);
+        if (c.getColor() == jugada.getColor() || c.getValor() <= jugada.getValor()) {
+          tomadas.add(c);
+        }
+      }
+      // remover las tomadas del desfile (manteniendo orden del resto)
+      if (!tomadas.isEmpty()) {
+        // quitarlas por instancia
+        estado.desfile.removeAll(tomadas);
+        // sumarlas a pilas del jugador, por color
+        for (Carta c : tomadas) {
+          j.pilas.computeIfAbsent(c.getColor(), x -> new ArrayList<>()).add(c);
+        }
+      }
+    }
+
+    // 3) robar (salvo que no queden cartas)
+    if (!mazo.isEmpty()) j.mano.add(robar());
+    estado.cartasMazoRestantes = mazo.size();
+
+    // última ronda (borrador): si alguien tiene los 6 colores o el mazo se termina
+    if (tieneSeisColores(j) || mazo.isEmpty()) {
+      ultimaRonda = true; // TODO: administrar “un turno extra cada uno, sin robar”
+    }
+
+    // avanzar turno (round-robin)
+    var ids = new ArrayList<>(estado.jugadores.keySet());
+    int idx = ids.indexOf(jugadorId);
+    estado.turnoDe = ids.get((idx + 1) % ids.size());
+
+    // fin de juego (placeholder): si mazo vacío y todos jugaron al menos una vez desde flag
+    if (ultimaRonda && mazo.isEmpty()) {
+      estado.juegoTerminado = true;
+      // TODO: scoring final real (mayorías valen 1, resto suma valor; empate menos cartas).
+    }
+  }
+
+  private Carta robar() { return mazo.pop(); }
+
+  private boolean tieneSeisColores(Jugador j) {
+    var colores = new HashSet<Color>();
+    for (var e : j.pilas.entrySet()) if (!e.getValue().isEmpty()) colores.add(e.getKey());
+    return colores.size() == Color.values().length;
+  }
+}

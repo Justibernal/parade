@@ -1,0 +1,190 @@
+package vista.consola;
+
+import modelo.core.Carta;
+import modelo.core.Color;
+import modelo.core.EstadoJuego;
+import net.CallbackClienteRemoto;
+import net.ServidorJuegoRemoto;
+
+import java.rmi.Naming;
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.List;
+import java.util.Scanner;
+
+public class ClienteConsolaMain {
+    private static String MY_ID;
+    private static String MY_NAME;
+    private static String ultimoEstado = "";
+    private static boolean primeraVez = true;
+    
+    public static void main(String[] args) throws Exception {
+        System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+        var server = (ServidorJuegoRemoto) Naming.lookup("rmi://127.0.0.1:1099/ParadeServer");
+
+        String nombre = (args.length > 0) ? args[0] : "Jugador";
+        MY_NAME = nombre;
+
+        var cb = new CallbackClienteRemoto() {
+            @Override
+            public void onStateUpdate(EstadoJuego estado) throws RemoteException {
+                if (estado == null) return;
+                if (primeraVez) {
+                    primeraVez = false;
+                    return;
+                }
+                mostrarEstado(estado);
+            }
+            
+            @Override
+            public void onEvent(String mensaje) throws RemoteException {
+                if (!mensaje.contains("[ping]")) {
+                    System.out.println("> " + mensaje);
+                    
+                    // Mostrar si se capturaron cartas
+                    if (mensaje.contains("capturó") || mensaje.contains("cartas")) {
+                        System.out.println(">>> " + mensaje);
+                    }
+                }
+            }
+        };
+
+        CallbackClienteRemoto stub = (CallbackClienteRemoto) UnicastRemoteObject.exportObject(cb, 0);
+        MY_ID = server.join(nombre, stub);
+        
+        System.out.println("Conectado como: " + MY_NAME);
+        System.out.println("Comandos: start | play N | final N M | chat texto | exit");
+
+        try (var sc = new Scanner(System.in)) {
+            while (sc.hasNextLine()) {
+                String linea = sc.nextLine().trim();
+                
+                if (linea.equals("exit")) break;
+                else if (linea.equals("start")) server.start();
+                else if (linea.startsWith("play")) {
+                    String[] partes = linea.split(" ");
+                    if (partes.length == 2) {
+                        try {
+                            int n = Integer.parseInt(partes[1]);
+                            server.playCard(MY_ID, n);
+                        } catch (NumberFormatException e) {
+                            System.out.println("Número inválido");
+                        }
+                    }
+                } else if (linea.startsWith("final")) {
+                    // Para fase final: elegir 2 cartas
+                    String[] partes = linea.split(" ");
+                    if (partes.length == 3) {
+                        try {
+                            int n1 = Integer.parseInt(partes[1]);
+                            int n2 = Integer.parseInt(partes[2]);
+                            server.chooseFinalCards(MY_ID, new int[]{n1, n2});
+                        } catch (NumberFormatException e) {
+                            System.out.println("Números inválidos");
+                        }
+                    } else {
+                        System.out.println("Uso: final <índice1> <índice2>");
+                    }
+                } else if (linea.startsWith("chat")) {
+                    if (linea.length() > 4) {
+                        server.sendChat(MY_ID, linea.substring(4).trim());
+                    }
+                } else if (!linea.isEmpty()) {
+                    System.out.println("Comandos: start | play N | final N M | chat texto | exit");
+                }
+            }
+        }
+        
+        System.out.println("Desconectado");
+    }
+    
+    private static void mostrarEstado(EstadoJuego estado) {
+        StringBuilder sb = new StringBuilder();
+        
+        // Turno actual
+        String turnoNombre = "Esperando...";
+        boolean miTurno = false;
+        boolean faseFinal = false;
+        
+        if (estado.turnoDe != null) {
+            var turnoJugador = estado.jugadores.get(estado.turnoDe);
+            if (turnoJugador != null) {
+                turnoNombre = turnoJugador.nombre;
+                miTurno = MY_ID.equals(estado.turnoDe);
+            }
+        }
+        
+        // Verificar si estamos en fase final
+        if (estado.ultimaRonda && estado.pendientesEleccion.contains(MY_ID)) {
+            faseFinal = true;
+            turnoNombre = "FASE FINAL - Elegir 2 cartas";
+        }
+        
+        sb.append("\n=== PARADE ===\n");
+        sb.append("Turno: ").append(turnoNombre);
+        if (miTurno) sb.append(" (TÚ)");
+        if (faseFinal) sb.append(" [FASE FINAL]");
+        sb.append("\n");
+        
+        // Desfile completo
+        sb.append("Desfile: ").append(estado.desfile).append("\n");
+        
+        // Mazo
+        sb.append("Mazo: ").append(estado.cartasMazoRestantes).append(" cartas\n");
+        
+        // Mi mano
+        var yo = estado.jugadores.get(MY_ID);
+        if (yo != null) {
+            sb.append("\n--- TU MANO ---\n");
+            for (int i = 0; i < yo.mano.size(); i++) {
+                sb.append(i).append(": ").append(yo.mano.get(i)).append("\n");
+            }
+            
+            // Mis pilas capturadas
+            sb.append("\n--- TUS CARTAS CAPTURADAS ---\n");
+            if (yo.pilas.isEmpty()) {
+                sb.append("(ninguna)\n");
+            } else {
+                for (Color color : Color.values()) {
+                    List<Carta> cartas = yo.pilas.get(color);
+                    if (cartas != null && !cartas.isEmpty()) {
+                        sb.append(color).append(": ").append(cartas.size())
+                          .append(" cartas (valores: ");
+                        int suma = 0;
+                        for (Carta c : cartas) suma += c.getValor();
+                        sb.append("suma=").append(suma).append(")\n");
+                    }
+                }
+            }
+        }
+        
+        // Cartas de otros jugadores (solo cantidad por color)
+        sb.append("\n--- OTROS JUGADORES ---\n");
+        for (var jugador : estado.jugadores.values()) {
+            if (!jugador.id.equals(MY_ID)) {
+                int totalCartas = 0;
+                for (List<Carta> pilas : jugador.pilas.values()) {
+                    totalCartas += pilas.size();
+                }
+                sb.append(jugador.nombre).append(": ").append(totalCartas)
+                  .append(" cartas capturadas\n");
+            }
+        }
+        
+        // Instrucciones
+        sb.append("\n>>> ");
+        if (faseFinal) {
+            sb.append("FASE FINAL - Elige 2 cartas: final <índice1> <índice2>");
+        } else if (miTurno) {
+            sb.append("TU TURNO - Juega: play <índice>");
+        } else {
+            sb.append("Esperando turno...");
+        }
+        
+        String nuevoEstado = sb.toString();
+        if (!nuevoEstado.equals(ultimoEstado)) {
+            System.out.println(nuevoEstado);
+            ultimoEstado = nuevoEstado;
+        }
+    }
+}

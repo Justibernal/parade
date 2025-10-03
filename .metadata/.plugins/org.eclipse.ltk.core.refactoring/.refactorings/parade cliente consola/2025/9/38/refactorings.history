@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Move 3 packages to &apos;parade modelo/src&apos;&#x0A;- Original project: &apos;parade cliente consola&apos;&#x0A;- Destination element: &apos;parade modelo/src&apos;&#x0A;- Original elements:&#x0A;     parade cliente consola/src/parade.reglas&#x0A;     parade cliente consola/src/parade.modelo&#x0A;     parade cliente consola/src/parade.observer&#x0A;- Update references to refactored element" description="Move packages" destination="=parade modelo/src" element1="/src&lt;parade.reglas" element2="/src&lt;parade.modelo" element3="/src&lt;parade.observer" flags="589830" fragments="3" id="org.eclipse.jdt.ui.move" policy="org.eclipse.jdt.ui.movePackages" stamp="1758207230937" version="1.0"/>
+</session>

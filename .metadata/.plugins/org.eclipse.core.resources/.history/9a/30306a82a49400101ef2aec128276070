@@ -1,0 +1,11 @@
+package parade.net;
+import java.rmi.Remote;
+import java.rmi.RemoteException;
+import parade.modelo.EstadoJuego;
+
+public interface GameServerRemote extends Remote {
+  String join(String nombre, GameClientCallbackRemote cb) throws RemoteException; // devuelve playerId
+  void start() throws RemoteException;
+  void playCard(String playerId, int handIndex) throws RemoteException;
+  EstadoJuego getSnapshot() throws RemoteException;
+}

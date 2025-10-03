@@ -1,0 +1,5 @@
+package parade.server;
+
+public class GameServerImpl {
+
+}

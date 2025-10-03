@@ -1,0 +1,34 @@
+package controlador;
+
+import java.util.List;
+import modelo.core.EstadoJuego;
+import modelo.puntaje.EntradaClasificacion;
+
+public interface JuegoController {
+
+  
+
+  /** Conecta (lookup) y se registra con el servidor, devolviendo el id de jugador. */
+  String unirseJuego(String nombre, Listener listener) throws Exception;
+
+  void iniciarJuego() throws Exception;
+
+  /** Jugar carta por índice en la mano del jugador con id `playerId`. */
+  void jugarCarta(String playerId, int handIndex) throws Exception;
+
+  /** Persistencia en el servidor. */
+  void guardarPartida() throws Exception;
+  void cargarPartida() throws Exception;
+  
+  void sendChat(String playerId, String message) throws Exception;
+  void elegirCartasFinales(String playerId, int[] indices) throws Exception;
+
+  interface Listener {
+	    void onStateUpdate(EstadoJuego s);
+	    void onEvent(String msg);
+	  }
+  
+  /** Consultas varias. */
+  EstadoJuego obtenerEstadoActual() throws Exception;
+  List<EntradaClasificacion> getTopRanking(int n) throws Exception;
+}

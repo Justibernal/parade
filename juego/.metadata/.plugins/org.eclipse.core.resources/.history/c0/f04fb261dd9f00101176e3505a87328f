@@ -1,0 +1,161 @@
+package vista.consola;
+
+import modelo.core.Carta;
+import modelo.core.Color;
+import modelo.core.EstadoJuego;
+import net.CallbackClienteRemoto;
+import net.ServidorJuegoRemoto;
+
+import java.rmi.Naming;
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
+
+public class ClienteConsolaMain {
+    private static String MY_ID;
+    private static String MY_NAME;
+    
+    public static void main(String[] args) throws Exception {
+        System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+        var server = (ServidorJuegoRemoto) Naming.lookup("rmi://127.0.0.1:1099/ParadeServer");
+
+        String nombre = (args.length > 0) ? args[0] : "Jugador";
+        MY_NAME = nombre;
+
+        // Crear callback directo sin BusEventos
+        var cb = new CallbackClienteRemoto() {
+            @Override
+            public void onStateUpdate(EstadoJuego estado) throws RemoteException {
+                handleStateUpdate(estado);
+            }
+            
+            @Override
+            public void onEvent(String mensaje) throws RemoteException {
+                handleEvent(mensaje);
+            }
+        };
+
+        // Exportar el callback para RMI
+        CallbackClienteRemoto stub = (CallbackClienteRemoto) UnicastRemoteObject.exportObject(cb, 0);
+
+        // Me uno al juego
+        MY_ID = server.join(nombre, stub);
+        
+        System.out.println("Conectado como " + MY_NAME + " (id=" + MY_ID + ")");
+        System.out.println("Comandos: start | play <índice> | chat <mensaje> | exit");
+
+        try (var sc = new Scanner(System.in)) {
+            while (sc.hasNextLine()) {
+                var line = sc.nextLine().trim();
+                
+                if (line.equals("exit")) {
+                    System.out.println("Saliendo...");
+                    break;
+                } else if (line.equals("start")) {
+                    server.start();
+                } else if (line.startsWith("play")) {
+                    var parts = line.split("\\s+");
+                    if (parts.length >= 2) {
+                        try {
+                            int index = Integer.parseInt(parts[1]);
+                            server.playCard(MY_ID, index);
+                        } catch (NumberFormatException e) {
+                            System.out.println("Error: Índice debe ser un número");
+                        }
+                    } else {
+                        System.out.println("Uso: play <índice>");
+                    }
+                } else if (line.startsWith("chat")) {
+                    if (line.length() > 4) {
+                        String mensaje = line.substring(4).trim();
+                        server.sendChat(MY_ID, mensaje);
+                    } else {
+                        System.out.println("Uso: chat <mensaje>");
+                    }
+                } else if (!line.isEmpty()) {
+                    System.out.println("Comando no reconocido: " + line);
+                    System.out.println("Comandos: start | play <índice> | chat <mensaje> | exit");
+                }
+            }
+        }
+    }
+    
+    private static void handleStateUpdate(EstadoJuego estado) {
+        if (estado == null) return;
+        
+        if (estado.juegoTerminado) {
+            System.out.println("=== PARTIDA FINALIZADA ===");
+            mostrarResumenFinal(estado);
+            return;
+        }
+        
+        // Información básica del estado
+        var turno = estado.jugadores.get(estado.turnoDe);
+        boolean esMiTurno = estado.turnoDe != null && estado.turnoDe.equals(MY_ID);
+        
+        System.out.println("\n=== ESTADO ACTUAL ===");
+        System.out.println("Turno: " + (esMiTurno ? "TU TURNO" : 
+                          (turno != null ? turno.nombre : "?")));
+        System.out.println("Cartas en mazo: " + estado.cartasMazoRestantes);
+        
+        // Desfile
+        System.out.println("Desfile: " + estado.desfile);
+        
+        // Mi mano
+        var miJugador = estado.jugadores.get(MY_ID);
+        if (miJugador != null) {
+            System.out.println("\n--- TU MANO ---");
+            for (int i = 0; i < miJugador.mano.size(); i++) {
+                System.out.println("  " + i + ": " + miJugador.mano.get(i));
+            }
+            
+            // Mis pilas
+            System.out.println("\n--- TUS PILAS ---");
+            if (miJugador.pilas.isEmpty()) {
+                System.out.println("  (sin cartas capturadas)");
+            } else {
+                for (Map.Entry<Color, List<Carta>> entry : miJugador.pilas.entrySet()) {
+                    System.out.println("  " + entry.getKey() + ": " + 
+                                     entry.getValue().size() + " cartas");
+                }
+            }
+        }
+        
+        // Jugadores conectados
+        System.out.println("\n--- JUGADORES ---");
+        for (var jugador : estado.jugadores.values()) {
+            String esYo = jugador.id.equals(MY_ID) ? " (vos)" : "";
+            System.out.println("  " + jugador.nombre + esYo + 
+                             " - " + jugador.pilas.size() + " colores");
+        }
+        
+        if (esMiTurno) {
+            System.out.println("\n>>> Es tu turno! Usa: play <índice>");
+        }
+        System.out.println("=================================");
+    }
+    
+    private static void handleEvent(String mensaje) {
+        if (mensaje.startsWith("[CHAT]")) {
+            System.out.println("[CHAT] " + mensaje.substring(6));
+        } else {
+            System.out.println("[INFO] " + mensaje);
+        }
+    }
+    
+    private static void mostrarResumenFinal(EstadoJuego estado) {
+        System.out.println("\n=== RESULTADOS FINALES ===");
+        for (var jugador : estado.jugadores.values()) {
+            int totalCartas = 0;
+            for (List<Carta> pilas : jugador.pilas.values()) {
+                totalCartas += pilas.size();
+            }
+            String esYo = jugador.id.equals(MY_ID) ? " (VOS)" : "";
+            System.out.println(jugador.nombre + esYo + ": " + 
+                             totalCartas + " cartas capturadas");
+        }
+        System.out.println("============================");
+    }
+}

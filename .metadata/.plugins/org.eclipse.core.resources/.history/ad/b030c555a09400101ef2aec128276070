@@ -1,0 +1,19 @@
+package parade.modelo;
+import java.io.Serializable;
+import java.util.*;
+
+public class EstadoJuego implements Serializable {
+  private static final long serialVersionUID = 1L;
+  public static class Jugador implements Serializable {
+    private static final long serialVersionUID = 1L;
+    public String id, nombre;
+    public List<Carta> mano = new ArrayList<>();
+    public Map<Color, List<Carta>> pilas = new EnumMap<>(Color.class);
+  }
+
+  public List<Carta> desfile = new ArrayList<>(); // fila en mesa (frente a izquierda, final a derecha)
+  public Map<String, Jugador> jugadores = new LinkedHashMap<>();
+  public String turnoDe; // id del jugador al que le toca
+  public int cartasMazoRestantes;
+  public boolean juegoTerminado;
+}

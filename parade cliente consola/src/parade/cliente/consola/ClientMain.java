@@ -1,0 +1,46 @@
+package parade.cliente.consola;
+
+import parade.net.GameServerRemote;
+import parade.modelo.EstadoJuego;
+import parade.observer.EventBus;
+
+import java.beans.PropertyChangeEvent;
+import java.rmi.Naming;
+
+public class ClientMain {
+	  public static void main(String[] args) throws Exception {
+	    var server = (GameServerRemote) Naming.lookup("rmi://localhost:1099/ParadeServer");
+
+	    var bus = new EventBus();
+	    bus.addListener((PropertyChangeEvent e) -> {
+	      switch (e.getPropertyName()){
+	        case "EVENT": System.out.println("[EVENT] " + e.getNewValue()); break;
+	        case "STATE":
+	          var s = (EstadoJuego) e.getNewValue();
+	          System.out.println("[STATE] turno=" + s.turnoDe +
+	              " | desfile=" + s.desfile + " | mazo=" + s.cartasMazoRestantes);
+	          break;
+	      }
+	    });
+
+	    var cb = new ClientCallBack(bus);
+	    String myId = server.join(args.length>0 ? args[0] : "Jugador", cb);
+	    System.out.println("Conectado id=" + myId + ". Comandos: start | play <i>");
+
+	    // ⬇️ esto elimina el warning
+	    try (var sc = new java.util.Scanner(System.in)) {
+	      while (sc.hasNextLine()) {
+	        var line = sc.nextLine().trim();
+	        if (line.equals("start")) server.start();
+	        else if (line.startsWith("play")) {
+	          var p = line.split("\\s+");
+	          if (p.length >= 2) {
+	            int i = Integer.parseInt(p[1]);
+	            server.playCard(myId, i);
+	          }
+	        }
+	      }
+	    }
+	  }
+	}
+

@@ -1,0 +1,23 @@
+package parade.cliente.consola;
+import parade.net.GameServerRemote;
+import java.rmi.Naming;
+import java.util.Scanner;
+
+public class ClientMain {
+  public static void main(String[] args) throws Exception {
+    GameServerRemote server = (GameServerRemote) Naming.lookup("rmi://localhost:1099/ParadeServer");
+    var cb = new ClientCallback();
+    String myId = server.join("Alicia", cb);
+
+    System.out.println("Conectado con id: " + myId + ". Escribí 'start' para iniciar o 'play <i>' para jugar índice de mano.");
+    var sc = new Scanner(System.in);
+    while (sc.hasNextLine()) {
+      String line = sc.nextLine().trim();
+      if (line.equals("start")) server.start();
+      else if (line.startsWith("play")) {
+        int i = Integer.parseInt(line.split("\\s+")[1]);
+        server.playCard(myId, i);
+      }
+    }
+  }
+}

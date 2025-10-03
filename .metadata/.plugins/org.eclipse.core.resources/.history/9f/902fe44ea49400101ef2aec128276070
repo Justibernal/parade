@@ -1,0 +1,20 @@
+package parade.reglas;
+import parade.modelo.*;
+import java.util.*;
+
+public class ReglasParade {
+  // Acá va: setup (66 cartas, 6 iniciales, reparto 5), jugar carta al final,
+  // evaluar retiros (mismo color o valor <= carta jugada más allá del índice), robar,
+  // detección última ronda y scoring. Empezamos con scaffolding:
+
+  public void iniciar(EstadoJuego estado, List<EstadoJuego.Jugador> jugadores) {
+    // TODO: crear mazo 66, barajar, repartir 5 a cada uno, poner 6 en estado.desfile,
+    // setear turnoDe, cartasMazoRestantes
+  }
+
+  public void jugarCarta(EstadoJuego estado, String jugadorId, int indiceMano) {
+    // TODO: validar turno, mover carta de la mano al final del desfile,
+    // aplicar evaluación de retiros según reglamento, robar si corresponde,
+    // avanzar turno y chequear fin de juego
+  }
+}

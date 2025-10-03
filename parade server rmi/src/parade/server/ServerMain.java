@@ -1,0 +1,15 @@
+package parade.server;
+
+import parade.net.GameServerRemote;
+import java.rmi.Naming;
+import java.rmi.registry.LocateRegistry;
+
+public class ServerMain {
+  public static void main(String[] args) throws Exception {
+    LocateRegistry.createRegistry(1099); // rmiregistry embebido
+    GameServerRemote server = new GameServerImpl();
+    Naming.rebind("rmi://localhost:1099/ParadeServer", server);
+    System.out.println("Servidor Parade RMI listo en 1099");
+  }
+}
+

@@ -1,0 +1,102 @@
+package vista.consola;
+
+import modelo.core.Carta;
+import modelo.core.EstadoJuego;
+import net.CallbackClienteRemoto;
+import net.ServidorJuegoRemoto;
+
+import java.rmi.Naming;
+import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
+import java.util.Scanner;
+
+public class ClienteConsolaMain {
+    private static String MY_ID;
+    private static String MY_NAME;
+    
+    public static void main(String[] args) throws Exception {
+        System.setProperty("java.rmi.server.hostname", "127.0.0.1");
+        var server = (ServidorJuegoRemoto) Naming.lookup("rmi://127.0.0.1:1099/ParadeServer");
+
+        String nombre = (args.length > 0) ? args[0] : "Jugador";
+        MY_NAME = nombre;
+
+        // Callback simple
+        var cb = new CallbackClienteRemoto() {
+            @Override
+            public void onStateUpdate(EstadoJuego estado) throws RemoteException {
+                if (estado == null) return;
+                
+                // Solo info esencial
+                var turnoJugador = estado.jugadores.get(estado.turnoDe);
+                String turnoNombre = turnoJugador != null ? turnoJugador.nombre : "?";
+                boolean miTurno = MY_ID != null && MY_ID.equals(estado.turnoDe);
+                
+                System.out.println("\n--- ESTADO ---");
+                System.out.println("Turno: " + turnoNombre + (miTurno ? " (TÚ)" : ""));
+                System.out.println("Desfile: " + estado.desfile.size() + " cartas");
+                System.out.println("Mazo: " + estado.cartasMazoRestantes);
+                
+                // Mi mano
+                var yo = estado.jugadores.get(MY_ID);
+                if (yo != null && !yo.mano.isEmpty()) {
+                    System.out.print("Tu mano: ");
+                    for (int i = 0; i < yo.mano.size(); i++) {
+                        System.out.print(i + ":" + yo.mano.get(i) + " ");
+                    }
+                    System.out.println();
+                }
+                
+                if (miTurno) {
+                    System.out.println(">>> TU TURNO - Juega: play <número>");
+                }
+            }
+            
+            @Override
+            public void onEvent(String mensaje) throws RemoteException {
+                
+                if (!mensaje.contains("[ping]")) {
+                    System.out.println("> " + mensaje);
+                }
+            }
+        };
+
+        // Exportar callback
+        CallbackClienteRemoto stub = (CallbackClienteRemoto) UnicastRemoteObject.exportObject(cb, 0);
+
+        // Unirse
+        MY_ID = server.join(nombre, stub);
+        
+        System.out.println("Conectado como: " + MY_NAME);
+        System.out.println("Comandos: start | play N | chat texto | exit");
+
+        // Leer comandos
+        try (var sc = new Scanner(System.in)) {
+            while (sc.hasNextLine()) {
+                String linea = sc.nextLine().trim();
+                
+                if (linea.equals("exit")) break;
+                else if (linea.equals("start")) server.start();
+                else if (linea.startsWith("play")) {
+                    String[] partes = linea.split(" ");
+                    if (partes.length == 2) {
+                        try {
+                            int n = Integer.parseInt(partes[1]);
+                            server.playCard(MY_ID, n);
+                        } catch (NumberFormatException e) {
+                            System.out.println("Número inválido");
+                        }
+                    }
+                } else if (linea.startsWith("chat")) {
+                    if (linea.length() > 4) {
+                        server.sendChat(MY_ID, linea.substring(4).trim());
+                    }
+                } else if (!linea.isEmpty()) {
+                    System.out.println("Comando no válido");
+                }
+            }
+        }
+        
+        System.out.println("Desconectado");
+    }
+}
