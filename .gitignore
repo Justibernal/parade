@@ -1,0 +1,19 @@
+# Java / builds
+target/
+out/
+bin/
+*.class
+
+# IDEs
+.idea/
+*.iml
+.project
+.classpath
+.settings/
+.metadata/
+.eclipse/
+*.launch
+
+# OS
+.DS_Store
+Thumbs.db
